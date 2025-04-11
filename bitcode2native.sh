@@ -7,7 +7,7 @@
 # Bitcode files must be created with clang/LLVM and may optionally contain debug info.
 #
 # Dependencies:
-#   - llvm-ar (can be overridden via --ar=ar)
+#   - llvm-ar
 #   - opt
 #   - llc
 #   - file
@@ -17,19 +17,21 @@
 #   - Supports .a, .o, and .bc input files
 #   - Accepts -O[0-3] to control optimization level (default: -O3)
 #   - Optionally strips debug info using --strip (via `opt -strip-debug`)
+#   - Optionally generates -fPIC compatible objects via --fpic
 #   - Outputs native .o files or .a archives to a specified directory (default: native/)
 #
 # Usage:
 #   bitcode_to_native libfoo.a
 #   bitcode_to_native file1.bc file2.o
-#   bitcode_to_native -O2 --strip --output-directory=build libfoo.a extra.bc
-#   bitcode_to_native --ar=llvm-ar libfoo.a
+#   bitcode_to_native -O2 --strip --output-directory=build libfoo.a
+#   bitcode_to_native --ar=llvm-ar --fpic libSDL2.a
 
 function bitcode_to_native() {
   local output_dir="native"
   local opt_level="-O3"
   local strip_debug=0
   local archiver="llvm-ar"
+  local use_fpic=0
   local inputs=()
 
   for arg in "$@"; do
@@ -41,6 +43,8 @@ function bitcode_to_native() {
       strip_debug=1
     elif [[ "$arg" == --ar=* ]]; then
       archiver="${arg#--ar=}"
+    elif [[ "$arg" == --fpic ]]; then
+      use_fpic=1
     else
       inputs+=("$arg")
     fi
@@ -50,6 +54,7 @@ function bitcode_to_native() {
   echo "-> opt=$opt_level debug=$([[ $strip_debug -eq 1 ]] && echo 'stripped' || echo 'preserved')"
   echo "-> Output directory: $output_dir"
   echo "-> Archiver: $archiver"
+  echo "-> fPIC: $([[ $use_fpic -eq 1 ]] && echo 'enabled' || echo 'disabled')"
 
   mkdir -p "$output_dir"
   set +m
@@ -62,10 +67,10 @@ function bitcode_to_native() {
 
     case "$ext" in
       a)
-        llvm_bitcode_process_archive "$input" "$output_dir" "$opt_level" "$strip_debug" "$archiver"
+        llvm_bitcode_process_archive "$input" "$output_dir" "$opt_level" "$strip_debug" "$archiver" "$use_fpic"
         ;;
       o|bc)
-        llvm_bitcode_process_single_file "$input" "$output_dir" "$opt_level" "$strip_debug"
+        llvm_bitcode_process_single_file "$input" "$output_dir" "$opt_level" "$strip_debug" "$use_fpic"
         ;;
       *)
         echo "⚠️  Skipping unsupported file: $input"
@@ -82,6 +87,7 @@ function llvm_bitcode_process_archive() {
   local opt="$3"
   local strip="$4"
   local ar="$5"
+  local fpic="$6"
   local base tmpdir
   base=$(basename "$archive")
   tmpdir=$(mktemp -d)
@@ -99,7 +105,7 @@ function llvm_bitcode_process_archive() {
   local jobs=()
 
   for f in "$tmpdir"/*.o; do
-    llvm_bitcode_process_object_file "$f" "$f" "$opt" "$strip" &
+    llvm_bitcode_process_object_file "$f" "$f" "$opt" "$strip" "$fpic" &
     jobs+=($!)
   done
 
@@ -121,12 +127,13 @@ function llvm_bitcode_process_single_file() {
   local outdir="$2"
   local opt="$3"
   local strip="$4"
+  local fpic="$5"
   local base name
   base=$(basename "$file")
   name="${base%.*}"
 
   echo "▶ Processing file: $file"
-  llvm_bitcode_process_object_file "$file" "$outdir/$name.o" "$opt" "$strip"
+  llvm_bitcode_process_object_file "$file" "$outdir/$name.o" "$opt" "$strip" "$fpic"
 }
 
 function llvm_bitcode_process_object_file() {
@@ -134,6 +141,7 @@ function llvm_bitcode_process_object_file() {
   local output="$2"
   local opt="$3"
   local strip="$4"
+  local fpic="$5"
   local base
   base=$(basename "$input")
 
@@ -146,7 +154,10 @@ function llvm_bitcode_process_object_file() {
       if ! opt "$opt" "$input" -o "${output}.opt.bc"; then return 1; fi
     fi
 
-    if ! llc -filetype=obj "${output}.opt.bc" -o "$output"; then return 1; fi
+    local llc_flags=(-filetype=obj)
+    [[ "$fpic" -eq 1 ]] && llc_flags+=("-relocation-model=pic")
+
+    if ! llc "${llc_flags[@]}" "${output}.opt.bc" -o "$output"; then return 1; fi
     rm "${output}.opt.bc"
   else
     echo "   → [$base] Native object – using as-is"
