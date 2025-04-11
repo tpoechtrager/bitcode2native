@@ -1,3 +1,27 @@
+# bitcode_to_native
+#
+# Converts LLVM bitcode static archives (.a) or object files (.o/.bc) to native .o files.
+# Bitcode files must be created with clang/LLVM and may optionally contain debug info.
+#
+# Dependencies:
+#   - llvm-ar
+#   - opt
+#   - llc
+#   - file
+#   - mktemp
+#
+# Features:
+#   - Supports .a, .o, and .bc input files
+#   - Accepts -O[0-3] to control optimization level (default: -O3)
+#   - Optionally strips debug info using --strip (via `opt -strip-debug`)
+#   - Outputs native files to a specified directory (default: native/)
+#
+# Usage:
+#   bitcode_to_native libfoo.a
+#   bitcode_to_native file1.bc file2.o
+#   bitcode_to_native -O2 --strip --output-directory=build libfoo.a extra.bc
+#
+
 function bitcode_to_native() {
   local output_dir="native"
   local opt_level="-O3"
@@ -106,12 +130,12 @@ function llvm_bitcode_process_object_file() {
   base=$(basename "$input")
 
   if file "$input" | grep -qE "LLVM (IR )?bitcode"; then
-    echo "   → [$base] LLVM bitcode – lowering with $opt (strip=$strip)"
+    echo "   → [$base] LLVM bitcode – lowering"
 
     if [[ "$strip" -eq 1 ]]; then
-        if ! opt "$opt" -strip-debug "$input" -o "${output}.opt.bc"; then return 1; fi
+      if ! opt "$opt" -strip-debug "$input" -o "${output}.opt.bc"; then return 1; fi
     else
-        if ! opt "$opt" "$input" -o "${output}.opt.bc"; then return 1; fi
+      if ! opt "$opt" "$input" -o "${output}.opt.bc"; then return 1; fi
     fi
 
     if ! llc -filetype=obj "${output}.opt.bc" -o "$output"; then return 1; fi
