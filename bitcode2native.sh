@@ -7,7 +7,7 @@
 # Bitcode files must be created with clang/LLVM and may optionally contain debug info.
 #
 # Dependencies:
-#   - llvm-ar
+#   - llvm-ar (can be overridden via --ar=ar)
 #   - opt
 #   - llc
 #   - file
@@ -23,12 +23,13 @@
 #   bitcode_to_native libfoo.a
 #   bitcode_to_native file1.bc file2.o
 #   bitcode_to_native -O2 --strip --output-directory=build libfoo.a extra.bc
-#
+#   bitcode_to_native --ar=llvm-ar libfoo.a
 
 function bitcode_to_native() {
   local output_dir="native"
   local opt_level="-O3"
   local strip_debug=0
+  local archiver="llvm-ar"
   local inputs=()
 
   for arg in "$@"; do
@@ -38,6 +39,8 @@ function bitcode_to_native() {
       opt_level="$arg"
     elif [[ "$arg" == --strip ]]; then
       strip_debug=1
+    elif [[ "$arg" == --ar=* ]]; then
+      archiver="${arg#--ar=}"
     else
       inputs+=("$arg")
     fi
@@ -46,6 +49,7 @@ function bitcode_to_native() {
   echo "▶ Converting bitcode to native objects"
   echo "-> opt=$opt_level debug=$([[ $strip_debug -eq 1 ]] && echo 'stripped' || echo 'preserved')"
   echo "-> Output directory: $output_dir"
+  echo "-> Archiver: $archiver"
 
   mkdir -p "$output_dir"
   set +m
@@ -58,7 +62,7 @@ function bitcode_to_native() {
 
     case "$ext" in
       a)
-        llvm_bitcode_process_archive "$input" "$output_dir" "$opt_level" "$strip_debug"
+        llvm_bitcode_process_archive "$input" "$output_dir" "$opt_level" "$strip_debug" "$archiver"
         ;;
       o|bc)
         llvm_bitcode_process_single_file "$input" "$output_dir" "$opt_level" "$strip_debug"
@@ -77,6 +81,7 @@ function llvm_bitcode_process_archive() {
   local outdir="$2"
   local opt="$3"
   local strip="$4"
+  local ar="$5"
   local base tmpdir
   base=$(basename "$archive")
   tmpdir=$(mktemp -d)
@@ -84,7 +89,7 @@ function llvm_bitcode_process_archive() {
   echo "▶ Processing archive: $archive"
   echo "   → Extracting to temporary directory: $tmpdir"
 
-  if ! ( cd "$(dirname "$archive")" && llvm-ar x "$base" --output="$tmpdir" ); then
+  if ! ( cd "$(dirname "$archive")" && "$ar" x "$base" --output="$tmpdir" ); then
     echo "❌ Failed to extract archive: $archive"
     echo "   → Temp dir preserved: $tmpdir"
     return
@@ -107,7 +112,7 @@ function llvm_bitcode_process_archive() {
   fi
 
   echo "✅ Creating native archive: $outdir/$base"
-  llvm-ar rcs "$outdir/$base" "$tmpdir"/*.o
+  "$ar" rcs "$outdir/$base" "$tmpdir"/*.o
   rm -rf "$tmpdir"
 }
 
@@ -133,7 +138,7 @@ function llvm_bitcode_process_object_file() {
   base=$(basename "$input")
 
   if file "$input" | grep -qE "LLVM (IR )?bitcode"; then
-    echo "   → [$base] LLVM bitcode – lowering"
+    echo "   → [$base] LLVM bitcode – optimizing and lowering"
 
     if [[ "$strip" -eq 1 ]]; then
       if ! opt "$opt" -strip-debug "$input" -o "${output}.opt.bc"; then return 1; fi
@@ -146,5 +151,6 @@ function llvm_bitcode_process_object_file() {
   else
     echo "   → [$base] Native object – using as-is"
     [[ "$input" != "$output" ]] && cp "$input" "$output"
+    return 0
   fi
 }
