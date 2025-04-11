@@ -3,6 +3,7 @@
 # bitcode_to_native
 #
 # Converts LLVM bitcode static archives (.a) or object files (.o/.bc) to native .o files.
+# Archives will be converted back into .a files containing native .o files.
 # Bitcode files must be created with clang/LLVM and may optionally contain debug info.
 #
 # Dependencies:
@@ -16,7 +17,7 @@
 #   - Supports .a, .o, and .bc input files
 #   - Accepts -O[0-3] to control optimization level (default: -O3)
 #   - Optionally strips debug info using --strip (via `opt -strip-debug`)
-#   - Outputs native files to a specified directory (default: native/)
+#   - Outputs native .o files or .a archives to a specified directory (default: native/)
 #
 # Usage:
 #   bitcode_to_native libfoo.a
