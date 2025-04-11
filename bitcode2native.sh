@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # bitcode_to_native
 #
 # Converts LLVM bitcode static archives (.a) or object files (.o/.bc) to native .o files.
